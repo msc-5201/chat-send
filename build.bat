@@ -1,4 +1,7 @@
 @echo off
+rem 本脚本与 src/*.c 均为 UTF-8 编码；中文 Windows 控制台默认代码页是 GBK(936)，
+rem 不切换的话中文提示会显示成乱码。这里切到 UTF-8 后再输出（>nul 隐藏 chcp 回显）。
+chcp 65001 >nul
 rem ============================================================
 rem  build.bat —— 编译聊天服务器
 rem  用法：在 test_web 目录下执行 build.bat

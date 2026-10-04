@@ -167,6 +167,13 @@ int main(void)
 
 #ifdef _WIN32
     WSADATA wsa;
+
+    /* 本工程源码与字符串常量均为 UTF-8：把控制台输入/输出代码页也切到 UTF-8，
+     * 否则中文 Windows 默认的 GBK 控制台会把启动信息、访问日志显示成乱码。
+     * 输出被重定向到文件时该调用会失败，但此时写出的本就是 UTF-8 字节，无影响。 */
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         fprintf(stderr, "WSAStartup failed\n");
         return 1;
