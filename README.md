@@ -185,3 +185,4 @@ src/db_*.c      SQLite 查询（参数绑定，全局锁保护）
 
 - HTTP 接口契约见 [API.md](API.md)
 - 数据库表结构见 [db.h](include/db.h) 顶部注释与 [db.c](src/db.c) 的 `db_init_schema()`
+=======
