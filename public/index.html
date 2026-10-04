@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>聊天室</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ============ 首屏（未登录） ============ -->
+  <div id="screen-welcome" class="screen screen-welcome">
+    <div class="welcome-card">
+      <div class="logo">💬</div>
+      <h1 class="welcome-title">聊天室</h1>
+      <p class="welcome-sub">世界聊天 · 好友私聊 · 即刻开始</p>
+      <div class="welcome-actions">
+        <button type="button" id="btn-guest" class="btn btn-primary btn-lg">以游客身份进入</button>
+        <div class="welcome-row">
+          <button type="button" id="btn-open-login" class="btn btn-lg">登录</button>
+          <button type="button" id="btn-open-register" class="btn btn-lg">注册</button>
+        </div>
+      </div>
+      <p class="welcome-tip">游客仅可使用世界聊天；登录后可添加好友与私聊。</p>
+    </div>
+  </div>
+
+  <!-- ============ 主界面 ============ -->
+  <div id="screen-app" class="screen screen-app hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button type="button" id="btn-sidebar-toggle" class="icon-btn" aria-label="切换侧栏">☰</button>
+        <span class="app-brand">聊天室</span>
+        <span class="topbar-sep">/</span>
+        <span id="room-name" class="room-name">世界聊天</span>
+      </div>
+      <div class="topbar-right">
+        <span id="conn-status" class="conn-status conn-ok" title="连接正常"></span>
+        <span id="mode-tag" class="mode-tag mode-guest">游客</span>
+        <button type="button" id="btn-logout" class="btn btn-ghost">退出</button>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- 左侧栏 -->
+      <aside id="sidebar" class="sidebar">
+        <section class="card identity-card">
+          <div class="identity-row">
+            <span class="identity-label">我的标识码</span>
+            <span id="my-uid" class="identity-value code">—</span>
+          </div>
+          <div class="identity-row" id="handle-row">
+            <span class="identity-label">身份码</span>
+            <span id="my-handle" class="identity-value code">—</span>
+            <button type="button" id="btn-edit-handle" class="btn btn-mini">修改</button>
+          </div>
+          <div class="handle-editor hidden" id="handle-editor">
+            <input type="text" id="in-handle" maxlength="32" placeholder="3-32 位 [A-Za-z0-9_-]">
+            <div class="handle-editor-actions">
+              <button type="button" id="btn-handle-save" class="btn btn-mini btn-primary">保存</button>
+              <button type="button" id="btn-handle-cancel" class="btn btn-mini">取消</button>
+            </div>
+          </div>
+        </section>
+
+        <nav class="card nav-card">
+          <button type="button" id="btn-world" class="nav-item active">
+            <span class="nav-icon">🌍</span><span>世界聊天</span>
+          </button>
+        </nav>
+
+        <section class="card" id="requests-card">
+          <h3 class="card-title">好友申请 <span id="req-badge" class="badge hidden">0</span></h3>
+          <ul id="request-list" class="list"></ul>
+        </section>
+
+        <section class="card">
+          <h3 class="card-title">好友列表</h3>
+          <ul id="friend-list" class="list"></ul>
+        </section>
+
+        <section class="card" id="add-friend-card">
+          <h3 class="card-title">添加好友</h3>
+          <div class="add-row">
+            <input type="text" id="in-add-friend" maxlength="32" placeholder="对方身份码">
+            <button type="button" id="btn-add-friend" class="btn btn-mini btn-primary">添加</button>
+          </div>
+        </section>
+      </aside>
+
+      <!-- 右侧主区 -->
+      <section class="chat">
+        <div id="messages" class="messages"></div>
+        <div id="messages-empty" class="messages-empty">还没有消息，说点什么吧～</div>
+        <form id="composer" class="composer">
+          <button type="button" id="btn-attach" class="btn attach-btn" title="发送文件 / 图片 / 视频">📎</button>
+          <input type="text" id="in-message" maxlength="2000" autocomplete="off" placeholder="输入消息…">
+          <button type="submit" class="btn btn-primary">发送</button>
+        </form>
+        <input type="file" id="file-input" class="hidden">
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ 登录 / 注册 弹窗 ============ -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <button type="button" id="modal-close" class="modal-close" aria-label="关闭">×</button>
+      <div class="tabs">
+        <button type="button" id="tab-login" class="tab active">登录</button>
+        <button type="button" id="tab-register" class="tab">注册</button>
+      </div>
+      <form id="auth-form" class="auth-form">
+        <label class="field">
+          <span class="field-label">用户名</span>
+          <input type="text" id="in-username" maxlength="32" autocomplete="username" placeholder="3-32 位字母 / 数字 / 下划线">
+        </label>
+        <label class="field">
+          <span class="field-label">密码</span>
+          <input type="password" id="in-password" maxlength="64" autocomplete="current-password" placeholder="6-64 位">
+        </label>
+        <div id="auth-error" class="auth-error hidden"></div>
+        <button type="submit" id="auth-submit" class="btn btn-primary btn-block">登录</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 轻提示 -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- 图片/视频全屏预览 -->
+  <div id="lightbox" class="lightbox hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
