@@ -17,6 +17,22 @@
 #define CHAT_STATIC_ROOT "public"
 #endif
 
+/* ---- 仪表盘数据根目录 ----
+ * 每个注册用户一份目录：<CHAT_DASHBOARD_ROOT>/<用户名>/<用户名>.json
+ * （形如 Dashboard/alice/alice.json）。与 CHAT_STATIC_ROOT / CHAT_DB_PATH 一样
+ * 按「可执行文件所在目录」解析（main.c 启动时会切工作目录）。 */
+#ifndef CHAT_DASHBOARD_ROOT
+#define CHAT_DASHBOARD_ROOT "Dashboard"
+#endif
+
+/* ---- 长轮询等待上限（毫秒） ----
+ * 前端不再每秒空轮询：/api/poll 与 /api/transfer/poll 在没有新数据时
+ * 阻塞等待（见 notify.h），有新数据立即返回，否则最多等这么久。
+ * 编译期可覆盖（如测试用 -DCHAT_POLL_WAIT_MS=300 缩短等待）。 */
+#ifndef CHAT_POLL_WAIT_MS
+#define CHAT_POLL_WAIT_MS 25000
+#endif
+
 /* ---- 世界聊天房间名 ---- */
 #define ROOM_WORLD      "#world"
 

@@ -14,6 +14,7 @@
 #include "auth.h"
 #include "db.h"
 #include "http.h"
+#include "notify.h"
 #include "util.h"
 
 #include <errno.h>
@@ -220,18 +221,19 @@ static void respond_messages(int fd, const char *room, const char *frag)
     free(out);
 }
 
-/* 手工拼装 {"ok":true,"messages":[<msgs>],"requests":[<reqs>],"last_id":<id>} */
-static void respond_poll(int fd, const char *msgs, const char *reqs, long last_id)
+/* 手工拼装 {"ok":true,"messages":[<msgs>],"requests":[<reqs>],"last_id":<id>,"friends_rev":<rev>} */
+static void respond_poll(int fd, const char *msgs, const char *reqs,
+                         long last_id, long friends_rev)
 {
     static const char *const head = "{\"ok\":true,\"messages\":[";
     static const char *const mid = "],\"requests\":[";
-    /* 需要容纳 "],"last_id":" + 最多 20 字符的数字 + "}"，32 字节在 LP64 上会截断出非法 JSON */
-    char idbuf[48];
+    char idbuf[96];
     size_t len;
     char *out;
     char *p;
 
-    snprintf(idbuf, sizeof idbuf, "],\"last_id\":%ld}", last_id);
+    snprintf(idbuf, sizeof idbuf,
+             "],\"last_id\":%ld,\"friends_rev\":%ld}", last_id, friends_rev);
     len = strlen(head) + strlen(msgs) + strlen(mid) + strlen(reqs) + strlen(idbuf);
     out = (char *)malloc(len + 1);
     if (out == NULL) {
@@ -345,6 +347,9 @@ int message_send(const request_t *req, int fd)
         return CHAT_ERR;
     }
 
+    /* 唤醒所有挂在 /api/poll 上的长轮询：新消息立即送达，不必等超时 */
+    notify_ping();
+
     snprintf(resp, sizeof resp, "{\"ok\":true,\"id\":%d}", id);
     http_respond_json(fd, 200, resp);
     return CHAT_OK;
@@ -361,6 +366,8 @@ int message_poll(const request_t *req, int fd)
     char *reqbuf = NULL;
     long after_id;
     long last_id;
+    long friends_rev = 0;
+    long v0;
     int rc;
 
     if (auth_from_request(req, &me) != CHAT_OK) {
@@ -390,12 +397,16 @@ int message_poll(const request_t *req, int fd)
         respond_error(fd, 500, "服务器内部错误");
         return CHAT_ERR;
     }
+
+    /* 长轮询：先取一遍；若没有任何新消息 / 新申请，就挂在条件变量上等待，
+     * 而不是让前端每秒发一次空请求（白白占用带宽与线程）。
+     * v0 在取数之前读取：等待期间（含取数期间）的任何变化都会让
+     * notify_wait_until() 立即返回，因此不会漏掉中间发生的更新。 */
+    v0 = notify_ver();
     rc = db_msg_fetch_json(room, after_id, msgbuf, MSG_BUF_SIZE);
     if (rc != CHAT_OK) {
         msgbuf[0] = '\0';                  /* 轮询不因消息过多/取消息失败而失败 */
     }
-    last_id = last_id_of(msgbuf, after_id);
-
     if (!me.is_guest) {
         reqbuf = (char *)malloc(REQ_BUF_SIZE);
         if (reqbuf != NULL &&
@@ -404,7 +415,25 @@ int message_poll(const request_t *req, int fd)
         }
     }
 
-    respond_poll(fd, msgbuf, reqbuf ? reqbuf : "", last_id);
+    if (msgbuf[0] == '\0' && (reqbuf == NULL || reqbuf[0] == '\0')) {
+        notify_wait_until(v0, CHAT_POLL_WAIT_MS);
+
+        rc = db_msg_fetch_json(room, after_id, msgbuf, MSG_BUF_SIZE);
+        if (rc != CHAT_OK) {
+            msgbuf[0] = '\0';
+        }
+        if (!me.is_guest && reqbuf != NULL &&
+            db_friend_requests_json(me.user_id, reqbuf, REQ_BUF_SIZE) != CHAT_OK) {
+            reqbuf[0] = '\0';
+        }
+    }
+
+    last_id = last_id_of(msgbuf, after_id);
+    if (!me.is_guest) {
+        friends_rev = db_friend_rev();
+    }
+
+    respond_poll(fd, msgbuf, reqbuf ? reqbuf : "", last_id, friends_rev);
     free(reqbuf);
     free(msgbuf);
     return CHAT_OK;

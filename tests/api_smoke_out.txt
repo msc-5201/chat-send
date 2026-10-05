@@ -1,0 +1,207 @@
+编译并启动服务器 (端口 8099) ...
+服务器已就绪
+
+== 1. 游客模式 ==
+  [PASS] POST /api/guest -> 200
+  [PASS] 游客 id 为负数
+  [PASS] 游客 mode=guest
+  [PASS] 游客 handle 为空
+  [PASS] 游客 is_guest 为 true
+  [PASS] GET /api/me (游客) -> 200
+  [PASS] GET /api/me 的 id 是数字
+  [PASS] 两个游客 id 不同
+  [PASS] 游客 GET /api/friends -> 403
+  [PASS] 游客 POST /api/handle -> 403
+  [PASS] 游客可在世界聊天发言 -> 200
+  [PASS] 游客 /api/poll -> 200
+  [PASS] 游客 poll 的 requests 为空数组
+  [PASS] 游客 poll 能看到世界消息
+
+== 2. 注册与登录 ==
+  [PASS] 注册 alice -> 200
+  [PASS] 注册返回数字 id
+  [PASS] 标识码为 8 位数字
+  [PASS] 默认身份码形如 user_XXXX
+  [PASS] 注册响应 mode=normal
+  [PASS] 注册 bob -> 200
+  [PASS] 注册 carol -> 200
+  [PASS] 重复用户名 -> 409
+  [PASS] 重复用户名响应是合法 JSON
+  [PASS] 用户名过短 -> 400
+  [PASS] 用户名含非法字符 -> 400
+  [PASS] 用户名过长 -> 400
+  [PASS] 密码过短 -> 400
+  [PASS] 两次密码不一致 -> 400
+  [PASS] 两次密码一致 -> 注册成功
+  [PASS] 新注册账号可立即登录
+  [PASS] 登录（正确密码）-> 200
+  [PASS] 登录（错误密码）-> 401
+  [PASS] 错误密码响应是合法 JSON
+  [PASS] 登录（用户不存在）-> 401
+  [PASS] 不泄漏「用户不存在」
+
+== 3. 标识码与身份码 ==
+  [PASS] GET /api/me (登录) -> 200
+  [PASS] /api/me 的 uid 与注册一致
+  [PASS] /api/me 的 mode=normal
+  [PASS] /api/me 的 id 与注册一致
+  [PASS] alice 改身份码 -> 200
+  [PASS] 改身份码后 /api/me 立即刷新
+  [PASS] 标识码未被改变
+  [PASS] bob 改身份码 -> 200
+  [PASS] 改成已占用身份码 -> 409
+  [PASS] 身份码过短 -> 400
+  [PASS] 身份码含空格 -> 400
+
+== 3b. 仪表盘与修改密码 ==
+  [PASS] 未登录访问仪表盘 -> 401
+  [PASS] 游客访问仪表盘 -> 403
+  [PASS] 登录用户访问仪表盘 -> 200
+  [PASS] 仪表盘返回本人数据
+  [PASS] 仪表盘 id 与注册一致
+  [PASS] 仪表盘含标识码与身份码
+  [PASS] 仪表盘含注册时间
+  [PASS] 仪表盘含统计字段
+  [PASS] 仪表盘不泄漏密码哈希 / 盐
+  [PASS] 仪表盘给出数据文件路径
+  [PASS] 数据文件写入成功
+  [PASS] 创建了以用户名命名的目录
+  [PASS] 创建了 用户名.json
+  [PASS] 落盘 JSON 合法
+  [PASS] 落盘 JSON 内容与接口一致
+  [PASS] 落盘 JSON 不含密码哈希 / 盐
+  [PASS] 未登录改密码 -> 401
+  [PASS] 游客改密码 -> 403
+  [PASS] 当前密码不正确 -> 401
+  [PASS] 两次新密码不一致 -> 400
+  [PASS] 新密码过短 -> 400
+  [PASS] 新密码与当前密码相同 -> 400
+  [PASS] 修改密码 -> 200
+  [PASS] 旧密码已失效 -> 401
+  [PASS] 可用新密码登录 -> 200
+  [PASS] 改密码后当前会话仍有效
+
+== 4. 好友系统 ==
+  [PASS] 新用户好友列表为空
+  [PASS] 新用户申请列表为空
+  [PASS] 空列表响应是合法 JSON
+  [PASS] 加自己 -> 400
+  [PASS] 身份码不存在 -> 404
+  [PASS] 身份码格式非法 -> 400
+  [PASS] 超长身份码 -> 400（未被截断成合法值）
+  [PASS] 33 位身份码 -> 400
+  [PASS] 32 位身份码格式合法 -> 404（查不到该用户）
+  [PASS] alice 按身份码加 bob -> 200
+  [PASS] 重复申请 -> 409
+  [PASS] 申请人自己的待处理列表为空
+  [PASS] bob 看到 1 条好友申请
+  [PASS] 申请来自 alice
+  [PASS] 申请带申请人用户名
+  [PASS] poll 返回 friends_rev（同意申请前）
+  [PASS] 非收件人同意 -> 404
+  [PASS] bob 同意申请 -> 200
+  [PASS] alice 好友列表含 bob
+  [PASS] alice 待处理申请已清空
+  [PASS] 好友项含标识码 uid
+  [PASS] 好友项含布尔 is_guest
+  [PASS] bob 好友列表含 alice
+  [PASS] 乙同意后甲的 friends_rev 递增
+  [PASS] 已是好友再次申请 -> 409
+  [PASS] 不存在的申请 -> 404
+  [PASS] 非法申请编号 -> 400
+
+== 5. 世界聊天 ==
+  [PASS] 世界聊天发言 -> 200
+  [PASS] 第二条消息 id 递增
+  [PASS] 拉取世界消息 -> 200
+  [PASS] 世界消息条数 >= 2
+  [PASS] 消息含 sender 与本地时间 ts
+  [PASS] 消息响应是合法 JSON
+  [PASS] after 过滤只返回更新的消息
+  [PASS] 空消息 -> 400
+  [PASS] 超长消息 -> 400
+  [PASS] 含特殊字符的消息可发送 -> 200
+  [PASS] 特殊字符消息响应 JSON 合法
+  [PASS] 特殊字符原样保存未被破坏
+  [PASS] 消息含控制字符 -> 400
+  [PASS] 消息含 BEL 控制字符 -> 400
+  [PASS] 含大量换行的合法消息仍可发送 -> 200
+  [PASS] 纯空白消息 -> 400
+  [PASS] 消息含非法 UTF-8 (0xFF) -> 400
+  [PASS] 消息为过长 UTF-8 编码 -> 400
+  [PASS] 消息为 UTF-8 代理区 -> 400
+  [PASS] 中文/emoji/换行仍可发送 -> 200
+  [PASS] 非法房间名 -> 400
+  [PASS] 畸形 dm 房间名 -> 400
+
+== 6. 私聊 ==
+  [PASS] 好友私聊发言（乱序房名）-> 200
+  [PASS] 对方按正序房名能读到
+  [PASS] 私聊内容正确
+  [PASS] 第三方读他人私聊 -> 403
+  [PASS] 非好友私聊 -> 403
+  [PASS] 游客读私聊 -> 403
+  [PASS] 轮询他人私聊 -> 403
+  [PASS] 游客轮询私聊 -> 403
+  [PASS] 轮询非法房间名 -> 400
+  [PASS] 好友轮询私聊 -> 200
+  [PASS] 好友轮询私聊返回的是私聊消息
+
+== 6b. 文件传输信令 ==
+  [PASS] 未登录发送信令 -> 401
+  [PASS] 未登录轮询信令 -> 401
+  [PASS] 游客发送信令 -> 403
+  [PASS] 游客轮询信令 -> 403
+  [PASS] 非好友发送信令 -> 403
+  [PASS] 发给自己 -> 400
+  [PASS] 非法 kind -> 400
+  [PASS] 缺少 payload -> 400
+  [PASS] 好友发送 offer -> 200
+  [PASS] 发送方自己信箱为空
+  [PASS] 接收方轮询取到 1 条信令
+  [PASS] 信令 kind=offer
+  [PASS] 信令 from=alice
+  [PASS] 信令 payload 原样透传
+  [PASS] 轮询消费后信箱为空
+  [PASS] 好友发送 ice -> 200
+  [PASS] ice 信令可取到且 kind=ice
+
+== 7. 轮询 ==
+  [PASS] poll -> 200
+  [PASS] poll 响应是合法 JSON
+  [PASS] poll 返回数字 last_id
+  [PASS] poll 带 requests 字段
+  [PASS] poll 空消息列表是合法 JSON
+  [PASS] poll 空消息列表为 []
+  [PASS] poll 空列表时 last_id 回退为 after
+
+== 8. 登出与会话 ==
+  [PASS] 登出 -> 200
+  [PASS] 登出后 /api/me -> 401
+  [PASS] 未登录读消息 -> 401
+  [PASS] 无 Cookie 访问好友 -> 401
+
+== 9. 静态资源与路由 ==
+  [PASS] GET / -> 200
+  [PASS] 首页含 UTF-8 声明
+  [PASS] 首页引用了 app.js 与 style.css
+  [PASS] GET /style.css -> 200
+  [PASS] GET /app.js -> 200
+  [PASS] 不存在的静态资源 -> 404
+  [PASS] 不存在的接口 -> 404
+  [PASS] 不存在的接口返回 JSON
+  [PASS] 方法不匹配 -> 405
+
+== 10. 重启后数据持久化 ==
+  [PASS] 重启后仍可用原密码登录
+  [PASS] 重启后用户 id 保持一致
+  [PASS] 重启后身份码保持 alice_01
+  [PASS] 重启后标识码不变
+  [PASS] 重启后好友关系保留
+  [PASS] 重启后世界聊天记录保留
+  [PASS] 重启后私聊记录保留
+  [PASS] 重启后游客会话仍可创建
+
+==================================================
+汇总: 177 PASS / 0 FAIL
+==================================================

@@ -179,3 +179,33 @@ void db_session_clear_guests(void)
     sqlite3_exec(h, "DELETE FROM sessions WHERE is_guest = 1", NULL, NULL, NULL);
     db_unlock();
 }
+
+int db_session_delete_others(int user_id, const char *keep_token)
+{
+    static const char *const sql =
+        "DELETE FROM sessions WHERE user_id = ?1 AND is_guest = 0 AND token <> ?2";
+    sqlite3 *h;
+    sqlite3_stmt *st = NULL;
+    int removed = 0;
+
+    if (keep_token == NULL) {
+        return 0;
+    }
+
+    db_lock();
+    h = db_handle();
+    if (h == NULL) {
+        db_unlock();
+        return 0;
+    }
+    if (sqlite3_prepare_v2(h, sql, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, user_id);
+        sqlite3_bind_text(st, 2, keep_token, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_DONE) {
+            removed = sqlite3_changes(h);
+        }
+        sqlite3_finalize(st);
+    }
+    db_unlock();
+    return removed;
+}

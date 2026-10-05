@@ -10,6 +10,7 @@
 #include "db.h"
 #include "http.h"
 #include "json.h"
+#include "notify.h"
 #include "util.h"
 
 #include <limits.h>
@@ -181,6 +182,8 @@ int friend_add(const request_t *req, int fd)
         return fail(fd, 400, "无法添加该用户");
     }
 
+    /* 唤醒对方挂起的长轮询：新申请立即出现在他的好友申请列表里 */
+    notify_ping();
     return ok_message(fd, "好友申请已发送");
 }
 
@@ -206,6 +209,8 @@ static int friend_decide(const request_t *req, int fd, int accept)
         return fail(fd, 404, "申请不存在或无权处理");
     }
 
+    /* 唤醒双方挂起的长轮询：同意的瞬间，申请人无需刷新即可看到新好友 */
+    notify_ping();
     http_respond_json(fd, 200, "{\"ok\":true}");
     return CHAT_OK;
 }

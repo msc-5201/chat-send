@@ -11,6 +11,22 @@
 #include "db.h"
 #include "json.h"
 
+/* 好友关系版本号：任何好友申请 / 处理成功后 +1（只在 db_lock 保护下读写）。
+ * /api/poll 把它带给前端，前端发现变化即刷新好友列表。
+ * 注意：真正的「唤醒挂起的长轮询」在路由层（friend.c）做，
+ * 数据层不依赖 notify 模块，这样 db_smoke 单测不必链接 notify.c。 */
+static long g_friend_rev = 0;
+
+long db_friend_rev(void)
+{
+    long v;
+
+    db_lock();
+    v = g_friend_rev;
+    db_unlock();
+    return v;
+}
+
 /* 读一列文本并安全拷进定长缓冲（sqlite3_column_text 可能返回 NULL） */
 static void copy_col(char *dst, size_t n, sqlite3_stmt *st, int col)
 {
@@ -228,6 +244,9 @@ int db_friend_add_request(int from_id, int to_id)
         }
     }
 
+    if (ret == CHAT_OK) {
+        g_friend_rev++;        /* 版本号 +1：/api/poll 据此让前端刷新好友列表 */
+    }
     db_unlock();
     return ret;
 }
@@ -336,6 +355,9 @@ int db_friend_set_request(int req_id, int user_id, int accept)
                      : request_set_status(h, req_id, "rejected");
     }
 
+    if (ret == CHAT_OK) {
+        g_friend_rev++;        /* 同意 / 拒绝都会改变双方可见状态 */
+    }
     db_unlock();
     return ret;
 }

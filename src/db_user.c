@@ -311,3 +311,96 @@ int db_user_handle_taken(const char *handle, int exclude_id)
     db_unlock();
     return taken;
 }
+
+int db_user_set_password(int id, const char *pass_hash, const char *salt)
+{
+    static const char *const sql =
+        "UPDATE users SET pass_hash = ?1, salt = ?2 WHERE id = ?3";
+    sqlite3 *h;
+    sqlite3_stmt *st = NULL;
+    int ret = CHAT_ERR;
+
+    if (pass_hash == NULL || salt == NULL) {
+        return CHAT_ERR;
+    }
+
+    db_lock();
+    h = db_handle();
+    if (h == NULL) {
+        db_unlock();
+        return CHAT_ERR;
+    }
+    if (sqlite3_prepare_v2(h, sql, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, pass_hash, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, salt, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 3, id);
+        if (sqlite3_step(st) == SQLITE_DONE) {
+            /* changes()==0 说明 id 不存在（或新旧哈希完全相同，不会发生：每次都换新盐） */
+            ret = (sqlite3_changes(h) == 0) ? CHAT_ERR_NOTFOUND : CHAT_OK;
+        }
+        sqlite3_finalize(st);
+    }
+    db_unlock();
+    return ret;
+}
+
+int db_user_stats(int user_id, long *created_at, int *friend_count, int *message_count)
+{
+    static const char *const sql_created =
+        "SELECT created_at FROM users WHERE id = ?1";
+    static const char *const sql_friends =
+        "SELECT COUNT(*) FROM friends WHERE user_id = ?1";
+    static const char *const sql_messages =
+        "SELECT COUNT(*) FROM messages WHERE sender_id = ?1";
+    sqlite3 *h;
+    sqlite3_stmt *st = NULL;
+    int ret = CHAT_ERR_NOTFOUND;
+
+    if (created_at == NULL || friend_count == NULL || message_count == NULL) {
+        return CHAT_ERR;
+    }
+    *created_at = 0;
+    *friend_count = 0;
+    *message_count = 0;
+
+    db_lock();
+    h = db_handle();
+    if (h == NULL) {
+        db_unlock();
+        return CHAT_ERR;
+    }
+
+    /* 1) 注册时间：查不到即视为用户不存在，直接返回 */
+    if (sqlite3_prepare_v2(h, sql_created, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, user_id);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            *created_at = (long)sqlite3_column_int64(st, 0);
+            ret = CHAT_OK;
+        }
+        sqlite3_finalize(st);
+        st = NULL;
+    }
+
+    /* 2) 好友数 */
+    if (ret == CHAT_OK && sqlite3_prepare_v2(h, sql_friends, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, user_id);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            *friend_count = sqlite3_column_int(st, 0);
+        }
+        sqlite3_finalize(st);
+        st = NULL;
+    }
+
+    /* 3) 发言数（世界 + 私聊，按 sender_id 统计） */
+    if (ret == CHAT_OK && sqlite3_prepare_v2(h, sql_messages, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, user_id);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            *message_count = sqlite3_column_int(st, 0);
+        }
+        sqlite3_finalize(st);
+        st = NULL;
+    }
+
+    db_unlock();
+    return ret;
+}

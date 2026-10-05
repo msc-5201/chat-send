@@ -127,8 +127,17 @@ function Start-Server {
     try {
         $sources = (Get-ChildItem 'src\*.c').FullName
         $cargs = @('-O2', '-std=c11', '-Iinclude', '-Ithird_party', "-DCHAT_PORT=$Port",
+                   '-DCHAT_POLL_WAIT_MS=300',
                    '-o', $ExePath) + $sources + @((Join-Path $Root 'build\sqlite3.o'), '-lws2_32')
-        $out = & gcc @cargs 2>&1
+        # 编译器的警告会写到 stderr；在 $ErrorActionPreference='Stop' 下，
+        # 2>&1 会把它们当成终止错误，导致测试还没开始就中断。这里临时放宽，
+        # 只在 $LASTEXITCODE 非 0（真正编译失败）时判定失败。
+        $ErrorActionPreference = 'Continue'
+        try {
+            $out = & gcc @cargs 2>&1
+        } finally {
+            $ErrorActionPreference = 'Stop'
+        }
         if ($LASTEXITCODE -ne 0) { Write-Host $out; throw 'gcc 编译失败' }
     } finally { Pop-Location }
 
@@ -246,6 +255,16 @@ try {
     $r = Api POST '/api/register' @{ username = 'validname'; password = '12345' } $null
     Check '密码过短 -> 400' ($r.status -eq 400) "实际 $($r.status)"
 
+    # 注册两次密码：不一致直接 400；一致才继续后续流程
+    $r = Api POST '/api/register' @{ username = 'newbie'; password = 'secret123'; password2 = 'secret999' } $null
+    Check '两次密码不一致 -> 400' ($r.status -eq 400) "实际 $($r.status)"
+    $r = Api POST '/api/register' @{ username = 'newbie'; password = 'secret123'; password2 = 'secret123' } $null
+    Check '两次密码一致 -> 注册成功' ($r.status -eq 200) "实际 $($r.status)"
+    $newbieId = [int]$r.json.id
+    $newbie = New-Jar 'newbie'
+    $r = Api POST '/api/login' @{ username = 'newbie'; password = 'secret123' } $newbie
+    Check '新注册账号可立即登录' ($r.status -eq 200) "实际 $($r.status)"
+
     $r = Api POST '/api/login' @{ username = 'alice'; password = 'secret123' } $null
     Check '登录（正确密码）-> 200' ($r.status -eq 200) "实际 $($r.status)"
     $r = Api POST '/api/login' @{ username = 'alice'; password = 'WRONG' } $null
@@ -279,6 +298,62 @@ try {
     Check '身份码过短 -> 400' ($r.status -eq 400) "实际 $($r.status)"
     $r = Api POST '/api/handle' @{ handle = 'a b' } $alice
     Check '身份码含空格 -> 400' ($r.status -eq 400) "实际 $($r.status)"
+
+    # --------------------------------------------------------
+    Section '3b. 仪表盘与修改密码'
+
+    $r = Api GET '/api/dashboard' $null $null
+    Check '未登录访问仪表盘 -> 401' ($r.status -eq 401) "实际 $($r.status)"
+    $r = Api GET '/api/dashboard' $null $guest
+    Check '游客访问仪表盘 -> 403' ($r.status -eq 403) "实际 $($r.status)"
+
+    $r = Api GET '/api/dashboard' $null $newbie
+    Check '登录用户访问仪表盘 -> 200' ($r.status -eq 200) "实际 $($r.status)"
+    Check '仪表盘返回本人数据' ($r.json.dashboard.username -eq 'newbie') "实际 $($r.json.dashboard.username)"
+    Check '仪表盘 id 与注册一致' ([int]$r.json.dashboard.id -eq $newbieId)
+    Check '仪表盘含标识码与身份码' ($r.json.dashboard.uid -match '^\d{8}$' -and $r.json.dashboard.handle -match '^user_\d{4}$')
+    Check '仪表盘含注册时间' ($r.json.dashboard.created_at -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
+    Check '仪表盘含统计字段' ($null -ne $r.json.dashboard.friend_count -and $null -ne $r.json.dashboard.message_count)
+    Check '仪表盘不泄漏密码哈希 / 盐' ($r.body -notmatch 'pass_hash' -and $r.body -notmatch 'salt')
+    Check '仪表盘给出数据文件路径' ($r.json.path -eq 'Dashboard/newbie/newbie.json') "实际 $($r.json.path)"
+    Check '数据文件写入成功' ($r.json.file_written -eq $true) "实际 $($r.json.file_written)"
+
+    # 落盘结构：Dashboard/<用户名>/<用户名>.json
+    $dashDir  = Join-Path $Verify 'Dashboard\newbie'
+    $dashFile = Join-Path $dashDir 'newbie.json'
+    Check '创建了以用户名命名的目录' (Test-Path $dashDir) "缺失 $dashDir"
+    Check '创建了 用户名.json' (Test-Path $dashFile) "缺失 $dashFile"
+    if (Test-Path $dashFile) {
+        $onDisk = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($dashFile))
+        Check '落盘 JSON 合法' (IsJson $onDisk) "内容=[$onDisk]"
+        $diskJson = $onDisk | ConvertFrom-Json
+        Check '落盘 JSON 内容与接口一致' ($diskJson.username -eq 'newbie')
+        Check '落盘 JSON 不含密码哈希 / 盐' ($onDisk -notmatch 'pass_hash' -and $onDisk -notmatch 'salt')
+    }
+
+    # 修改密码
+    $r = Api POST '/api/password' @{ old_password = 'secret123'; new_password = 'newsecret1' } $null
+    Check '未登录改密码 -> 401' ($r.status -eq 401) "实际 $($r.status)"
+    $r = Api POST '/api/password' @{ old_password = 'secret123'; new_password = 'newsecret1' } $guest
+    Check '游客改密码 -> 403' ($r.status -eq 403) "实际 $($r.status)"
+    $r = Api POST '/api/password' @{ old_password = 'wrongpass'; new_password = 'newsecret1' } $newbie
+    Check '当前密码不正确 -> 401' ($r.status -eq 401) "实际 $($r.status)"
+    $r = Api POST '/api/password' @{ old_password = 'secret123'; new_password = 'newsecret1'; new_password2 = 'newsecret2' } $newbie
+    Check '两次新密码不一致 -> 400' ($r.status -eq 400) "实际 $($r.status)"
+    $r = Api POST '/api/password' @{ old_password = 'secret123'; new_password = 'short' } $newbie
+    Check '新密码过短 -> 400' ($r.status -eq 400) "实际 $($r.status)"
+    $r = Api POST '/api/password' @{ old_password = 'secret123'; new_password = 'secret123' } $newbie
+    Check '新密码与当前密码相同 -> 400' ($r.status -eq 400) "实际 $($r.status)"
+
+    $r = Api POST '/api/password' @{ old_password = 'secret123'; new_password = 'newsecret1'; new_password2 = 'newsecret1' } $newbie
+    Check '修改密码 -> 200' ($r.status -eq 200) "实际 $($r.status)"
+
+    $r = Api POST '/api/login' @{ username = 'newbie'; password = 'secret123' } $null
+    Check '旧密码已失效 -> 401' ($r.status -eq 401) "实际 $($r.status)"
+    $r = Api POST '/api/login' @{ username = 'newbie'; password = 'newsecret1' } $null
+    Check '可用新密码登录 -> 200' ($r.status -eq 200) "实际 $($r.status)"
+    $r = Api GET '/api/me' $null $newbie
+    Check '改密码后当前会话仍有效' ($r.status -eq 200) "实际 $($r.status)"
 
     # --------------------------------------------------------
     Section '4. 好友系统'
@@ -316,6 +391,10 @@ try {
     Check '申请带申请人用户名' ($r.json.requests[0].username -eq 'alice')
     $reqId = [int]$r.json.requests[0].id
 
+    $r = Api GET '/api/poll?room=%23world&after=0' $null $alice
+    Check 'poll 返回 friends_rev（同意申请前）' ($r.json.friends_rev -is [int] -or $r.json.friends_rev -is [long]) "rev=$($r.json.friends_rev)"
+    $aliceRevBefore = [long]$r.json.friends_rev
+
     $r = Api POST '/api/friends/accept' @{ id = "$reqId" } $alice
     Check '非收件人同意 -> 404' ($r.status -eq 404) "实际 $($r.status)"
 
@@ -330,6 +409,11 @@ try {
 
     $r = Api GET '/api/friends' $null $bob
     Check 'bob 好友列表含 alice' ((Get-Count $r.json.friends) -eq 1 -and [int]$r.json.friends[0].id -eq $aliceId)
+
+    # 长轮询下的好友即时可见：乙同意后，甲的 /api/poll 应立即返回并带上递增的
+    # friends_rev，前端据此自动刷新好友列表（无需手动刷新页面）
+    $r = Api GET '/api/poll?room=%23world&after=0' $null $alice
+    Check '乙同意后甲的 friends_rev 递增' ([long]$r.json.friends_rev -gt $aliceRevBefore) "rev=$($r.json.friends_rev) vs $aliceRevBefore"
 
     $r = Api POST '/api/friends/add' @{ handle = 'bob_01' } $alice
     Check '已是好友再次申请 -> 409' ($r.status -eq 409) "实际 $($r.status)"
@@ -547,6 +631,8 @@ finally {
     Stop-Server $server
     Remove-Item $DbGlob, $BodyFile -Force -ErrorAction SilentlyContinue
     Remove-Item $StaticCopy -Recurse -Force -ErrorAction SilentlyContinue
+    # 仪表盘落盘目录（Dashboard/<用户名>/<用户名>.json）也要清理
+    Remove-Item (Join-Path $Verify 'Dashboard') -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # ============================================================

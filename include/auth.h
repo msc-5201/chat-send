@@ -15,6 +15,7 @@ int auth_guest(const request_t *req, int fd);      /* POST /api/guest    */
 int auth_logout(const request_t *req, int fd);     /* POST /api/logout   */
 int auth_me(const request_t *req, int fd);         /* GET  /api/me       */
 int auth_set_handle(const request_t *req, int fd); /* POST /api/handle   */
+int auth_set_password(const request_t *req, int fd); /* POST /api/password */
 
 /* 从请求的 Cookie 中解析当前会话。成功返回 CHAT_OK 并填写 out。
  * 供 friend.c / message.c 复用。 */

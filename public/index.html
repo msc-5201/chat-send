@@ -1,10 +1,24 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN">
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>聊天室</title>
   <link rel="icon" href="data:,">
+  <!-- 在样式表之前定好主题，避免深色用户在首帧看到白屏（FOUC） -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('chat-theme');
+        if (t !== 'dark' && t !== 'light') {
+          t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+            ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { /* 隐私模式下 localStorage 可能抛错，忽略 */ }
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -38,6 +52,7 @@
       <div class="topbar-right">
         <span id="conn-status" class="conn-status conn-ok" title="连接正常"></span>
         <span id="mode-tag" class="mode-tag mode-guest">游客</span>
+        <button type="button" id="btn-theme" class="theme-toggle" aria-label="切换深色 / 浅色主题" title="切换深色 / 浅色主题">🌙</button>
         <button type="button" id="btn-logout" class="btn btn-ghost">退出</button>
       </div>
     </header>
@@ -68,6 +83,9 @@
           <button type="button" id="btn-world" class="nav-item active">
             <span class="nav-icon">🌍</span><span>世界聊天</span>
           </button>
+          <button type="button" id="btn-dashboard" class="nav-item">
+            <span class="nav-icon">📊</span><span>仪表盘</span>
+          </button>
         </nav>
 
         <section class="card" id="requests-card">
@@ -93,6 +111,41 @@
       <section class="chat">
         <div id="messages" class="messages"></div>
         <div id="messages-empty" class="messages-empty">还没有消息，说点什么吧～</div>
+
+        <!-- ============ 仪表盘（点左侧「仪表盘」切换进来） ============ -->
+        <div id="view-dashboard" class="dashboard hidden">
+          <div class="dash-top">
+            <h2 class="dash-title">我的仪表盘</h2>
+            <p class="dash-path" id="dash-path">—</p>
+          </div>
+          <div class="dash-body">
+            <section class="dash-card">
+              <h3 class="card-title">个人数据</h3>
+              <ul class="dash-list" id="dash-list"></ul>
+            </section>
+            <section class="dash-card">
+              <h3 class="card-title">修改密码</h3>
+              <form id="pw-form" class="dash-form">
+                <label class="field">
+                  <span class="field-label">当前密码</span>
+                  <input type="password" id="in-old-password" maxlength="64" autocomplete="current-password">
+                </label>
+                <label class="field">
+                  <span class="field-label">新密码</span>
+                  <input type="password" id="in-new-password" maxlength="64" autocomplete="new-password" placeholder="6-64 位">
+                </label>
+                <label class="field">
+                  <span class="field-label">确认新密码</span>
+                  <input type="password" id="in-new-password2" maxlength="64" autocomplete="new-password" placeholder="再次输入新密码">
+                </label>
+                <div id="pw-error" class="auth-error hidden"></div>
+                <button type="submit" id="pw-submit" class="btn btn-primary btn-block">保存新密码</button>
+              </form>
+              <p class="dash-note">修改成功后，其它设备上的登录会被迫下线。</p>
+            </section>
+          </div>
+        </div>
+
         <form id="composer" class="composer">
           <button type="button" id="btn-attach" class="btn attach-btn" title="发送文件 / 图片 / 视频">📎</button>
           <input type="text" id="in-message" maxlength="2000" autocomplete="off" placeholder="输入消息…">
@@ -119,6 +172,11 @@
         <label class="field">
           <span class="field-label">密码</span>
           <input type="password" id="in-password" maxlength="64" autocomplete="current-password" placeholder="6-64 位">
+        </label>
+        <!-- 仅注册时显示：二次输入密码，防止按错键盘导致注册完就登不上 -->
+        <label class="field hidden" id="field-password2">
+          <span class="field-label">确认密码</span>
+          <input type="password" id="in-password2" maxlength="64" autocomplete="new-password" placeholder="再次输入密码">
         </label>
         <div id="auth-error" class="auth-error hidden"></div>
         <button type="submit" id="auth-submit" class="btn btn-primary btn-block">登录</button>

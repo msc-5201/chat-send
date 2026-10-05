@@ -8,6 +8,7 @@
 #include "router.h"
 
 #include "auth.h"
+#include "dashboard.h"
 #include "friend.h"
 #include "http.h"
 #include "message.h"
@@ -29,6 +30,8 @@ static const route_t ROUTES[] = {
     { "POST", "/api/logout",          auth_logout      },
     { "GET",  "/api/me",              auth_me          },
     { "POST", "/api/handle",          auth_set_handle  },
+    { "POST", "/api/password",        auth_set_password },
+    { "GET",  "/api/dashboard",       dashboard_get    },
     { "GET",  "/api/friends",         friend_list      },
     { "POST", "/api/friends/add",     friend_add       },
     { "POST", "/api/friends/accept",  friend_accept    },

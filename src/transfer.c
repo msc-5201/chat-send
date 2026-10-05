@@ -17,6 +17,7 @@
 #include "db.h"
 #include "http.h"
 #include "json.h"
+#include "notify.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,7 +128,6 @@ static int mailbox_push(int from, int to, const char *kind, const char *payload)
     memcpy(s.payload, payload, plen + 1);
     s.from = from;
     s.to   = to;
-    s.id   = g_next_id++;
     {
         size_t klen = strlen(kind);
         if (klen >= sizeof(s.kind)) {
@@ -138,6 +138,8 @@ static int mailbox_push(int from, int to, const char *kind, const char *payload)
     }
 
     mailbox_lock();
+    /* g_next_id 是多线程共享的计数器，必须在信箱锁内递增，否则存在数据竞争 */
+    s.id = g_next_id++;
     if (g_count >= MAX_PENDING_SIGNALS) {
         /* 丢掉最旧的一条，为新信令腾位置 */
         free(g_signals[0].payload);
@@ -158,6 +160,7 @@ static int mailbox_push(int from, int to, const char *kind, const char *payload)
     }
     g_signals[g_count++] = s;
     mailbox_unlock();
+    notify_ping();               /* 唤醒对方挂在 /api/transfer/poll 上的长轮询 */
     return CHAT_OK;
 }
 
@@ -247,13 +250,54 @@ int transfer_send(const request_t *req, int fd)
     return CHAT_OK;
 }
 
+/* 估算属于 uid 的信令序列化后需要的缓冲大小（payload 转义最多放大约 6 倍） */
+static size_t signals_need(int uid)
+{
+    size_t i, need = 64;
+
+    mailbox_lock();
+    for (i = 0; i < g_count; i++) {
+        if (g_signals[i].to == uid) {
+            need += strlen(g_signals[i].payload) * 6 + 160;
+        }
+    }
+    mailbox_unlock();
+    return need;
+}
+
+/* 收集并消费（删除）属于 uid 的信令，拼成 JSON 数组片段写入 out */
+static void collect_signals(int uid, char *out, size_t n)
+{
+    size_t i, w;
+
+    mailbox_lock();
+    out[0] = '\0';
+    for (i = 0; i < g_count; i++) {
+        if (g_signals[i].to == uid) {
+            push_signal_item(out, n, &g_signals[i]);
+        }
+    }
+    /* 消费（删除）属于本人的信令 */
+    w = 0;
+    for (i = 0; i < g_count; i++) {
+        if (g_signals[i].to != uid) {
+            g_signals[w++] = g_signals[i];
+        } else {
+            free(g_signals[i].payload);
+        }
+    }
+    g_count = w;
+    mailbox_unlock();
+}
+
 /* GET /api/transfer/poll */
 int transfer_poll(const request_t *req, int fd)
 {
     session_t me;
-    size_t i, w, need;
+    size_t need;
     char *out;
     char *resp;
+    long v0;
     int rc;
 
     if (auth_from_request(req, &me) != CHAT_OK) {
@@ -265,42 +309,35 @@ int transfer_poll(const request_t *req, int fd)
         return CHAT_ERR;
     }
 
-    mailbox_lock();
-
-    /* 先按最坏情况估缓冲：payload 转义最多放大约 6 倍 */
-    need = 64;
-    for (i = 0; i < g_count; i++) {
-        if (g_signals[i].to == me.user_id) {
-            need += strlen(g_signals[i].payload) * 6 + 160;
-        }
-    }
+    v0 = notify_ver();
+    need = signals_need(me.user_id);
     out = (char *)malloc(need);
     if (out == NULL) {
-        mailbox_unlock();
         respond_error(fd, 500, "服务器内部错误");
         return CHAT_ERR;
     }
-    out[0] = '\0';
+    collect_signals(me.user_id, out, need);
 
-    /* 收集属于本人的信令，拼成 JSON 数组片段 */
-    for (i = 0; i < g_count; i++) {
-        if (g_signals[i].to == me.user_id) {
-            push_signal_item(out, need, &g_signals[i]);
+    /* 长轮询：信箱为空时阻塞等待新信令，而不是让前端每秒空轮询。
+     * 等待期间可能涌入大量新信令，缓冲可能不够，按最新估算扩容一次。 */
+    if (out[0] == '\0') {
+        size_t need2;
+
+        notify_wait_until(v0, CHAT_POLL_WAIT_MS);
+        need2 = signals_need(me.user_id);
+        if (need2 > need) {
+            char *out2 = (char *)realloc(out, need2);
+
+            if (out2 == NULL) {
+                free(out);
+                respond_error(fd, 500, "服务器内部错误");
+                return CHAT_ERR;
+            }
+            out = out2;
+            need = need2;
         }
+        collect_signals(me.user_id, out, need);
     }
-
-    /* 消费（删除）属于本人的信令 */
-    w = 0;
-    for (i = 0; i < g_count; i++) {
-        if (g_signals[i].to != me.user_id) {
-            g_signals[w++] = g_signals[i];
-        } else {
-            free(g_signals[i].payload);
-        }
-    }
-    g_count = w;
-
-    mailbox_unlock();
 
     rc = CHAT_OK;
     resp = (char *)malloc(strlen(out) + 64);

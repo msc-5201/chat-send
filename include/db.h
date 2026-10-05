@@ -62,6 +62,15 @@ int db_user_set_handle(int id, const char *handle);
 /* 身份码是否已被别人占用（exclude_id 为 -1 表示不排除任何人） */
 int db_user_handle_taken(const char *handle, int exclude_id);
 
+/* 修改密码：整体替换 pass_hash 与 salt（调用方须已用新盐算好哈希）。
+ * 成功返回 CHAT_OK；用户不存在返回 CHAT_ERR_NOTFOUND */
+int db_user_set_password(int id, const char *pass_hash, const char *salt);
+
+/* 仪表盘用的个人统计（一次加锁内完成三条查询）：
+ * 注册时间（Unix 秒）、好友数、发言数（含世界与私聊）。
+ * 用户不存在返回 CHAT_ERR_NOTFOUND；三个出参均不可为 NULL。 */
+int db_user_stats(int user_id, long *created_at, int *friend_count, int *message_count);
+
 /* ================= db_session.c：会话表 ================= */
 
 /* 创建会话，token 由调用方生成 */
@@ -75,6 +84,10 @@ void db_session_touch(const char *token);
 void db_session_delete(const char *token);
 /* 服务器启动时清理遗留的游客会话 */
 void db_session_clear_guests(void);
+
+/* 修改密码后踢掉该用户的其它登录会话（保留 keep_token 这一个）。
+ * 返回被删除的会话数。 */
+int db_session_delete_others(int user_id, const char *keep_token);
 
 /* ================= db_friend.c：好友 ================= */
 
@@ -95,6 +108,11 @@ int db_friend_list_json(int user_id, char *out, size_t n);
 
 /* 两人是否为好友，是返回 CHAT_OK，否则 CHAT_ERR_NOTFOUND */
 int db_friend_are(int a, int b);
+
+/* 好友关系版本号：任何好友申请 / 处理成功后 +1。
+ * /api/poll 把它带给前端，前端发现变化即刷新好友列表，
+ * 这样「乙同意申请后，甲不用刷新页面就能看到乙」。 */
+long db_friend_rev(void);
 
 /* ================= db_message.c：消息 ================= */
 

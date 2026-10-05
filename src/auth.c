@@ -6,6 +6,7 @@
  */
 #include "auth.h"
 
+#include "dashboard.h"
 #include "db.h"
 #include "http.h"
 #include "json.h"
@@ -172,12 +173,14 @@ int auth_register(const request_t *req, int fd)
      * 用小缓冲会把 33 位用户名静默截成 32 位而误判合法。 */
     char username[128];
     char password[128];
+    char password2[128];
     char salt[33];
     char hash[65];
     char uid[MAX_UID + 1];
     char handle[MAX_HANDLE + 1];
     char token[MAX_TOKEN + 1];
     user_t u;
+    int has_pw2;
     int i;
     int rc;
 
@@ -193,6 +196,13 @@ int auth_register(const request_t *req, int fd)
     }
     if (strlen(password) < 6 || strlen(password) > 64) {
         send_error(fd, 400, "密码长度需为 6-64 位");
+        return CHAT_ERR;
+    }
+    /* 二次密码校验：网页端注册表单必带 password2；API 客户端可省略。
+     * 带上就一定要相等，避免「按错键盘导致注册完就登不上」。 */
+    has_pw2 = (http_param(req, "password2", password2, sizeof(password2)) == CHAT_OK);
+    if (has_pw2 && strcmp(password2, password) != 0) {
+        send_error(fd, 400, "两次输入的密码不一致");
         return CHAT_ERR;
     }
 
@@ -245,6 +255,12 @@ int auth_register(const request_t *req, int fd)
     if (db_session_create(token, u.id, 0, u.uid, u.handle, u.username) != CHAT_OK) {
         send_error(fd, 500, "服务器内部错误");
         return CHAT_ERR;
+    }
+
+    /* 建立 Dashboard/<用户名>/<用户名>.json 个人数据文件。
+     * 写盘失败不影响注册结果（用户仍然创建成功），下次打开仪表盘会自愈重试。 */
+    if (dashboard_write_user(&u) != CHAT_OK) {
+        fprintf(stderr, "[auth] 仪表盘数据文件写入失败: %s\n", u.username);
     }
 
     send_identity(fd, u.id, 0, u.uid, u.handle, u.username, token, 0);
@@ -417,5 +433,87 @@ int auth_set_handle(const request_t *req, int fd)
         return CHAT_ERR;
     }
     http_respond_json(fd, 200, json);
+    return CHAT_OK;
+}
+
+/* ---------------------------------------------------------------- 修改密码 */
+
+int auth_set_password(const request_t *req, int fd)
+{
+    session_t s;
+    user_t u;
+    /* 取参缓冲故意大于字段上限：短缓冲会把超长密码静默截断成"变合法" */
+    char old_pw[128];
+    char new_pw[128];
+    char new_pw2[128];
+    char salt[33];
+    char stored[512];       /* 库里存的是 64 位十六进制；留足余量避免 CHAT_ERR_FULL */
+    char old_salt[128];
+    char calc[65];
+    char hash[65];
+    int has_pw2;
+    int rc;
+
+    if (auth_from_request(req, &s) != CHAT_OK) {
+        send_error(fd, 401, "未登录");
+        return CHAT_ERR;
+    }
+    if (s.is_guest) {
+        send_error(fd, 403, "游客不能修改密码");
+        return CHAT_ERR;
+    }
+    if (http_param(req, "old_password", old_pw, sizeof(old_pw)) != CHAT_OK ||
+        http_param(req, "new_password", new_pw, sizeof(new_pw)) != CHAT_OK ||
+        old_pw[0] == '\0' || new_pw[0] == '\0') {
+        send_error(fd, 400, "请填写当前密码与新密码");
+        return CHAT_ERR;
+    }
+    /* 二次输入校验；网页端必带 new_password2，API 客户端可省略 */
+    has_pw2 = (http_param(req, "new_password2", new_pw2, sizeof(new_pw2)) == CHAT_OK);
+    if (has_pw2 && strcmp(new_pw2, new_pw) != 0) {
+        send_error(fd, 400, "两次输入的新密码不一致");
+        return CHAT_ERR;
+    }
+    if (strlen(new_pw) < 6 || strlen(new_pw) > 64) {
+        send_error(fd, 400, "新密码长度需为 6-64 位");
+        return CHAT_ERR;
+    }
+
+    /* 取当前哈希与盐，先校验旧密码（失败与「用户不存在」同一文案） */
+    memset(&u, 0, sizeof(u));
+    if (db_user_by_id(s.user_id, &u) != CHAT_OK) {
+        send_error(fd, 500, "服务器内部错误");
+        return CHAT_ERR;
+    }
+    rc = db_user_by_username(u.username, NULL, stored, sizeof(stored),
+                             old_salt, sizeof(old_salt));
+    if (rc != CHAT_OK) {
+        send_error(fd, 500, "服务器内部错误");
+        return CHAT_ERR;
+    }
+    if (make_pass_hash(old_salt, old_pw, calc) != CHAT_OK || !ct_equal(calc, stored)) {
+        send_error(fd, 401, "当前密码不正确");
+        return CHAT_ERR;
+    }
+    if (strcmp(old_pw, new_pw) == 0) {
+        send_error(fd, 400, "新密码不能与当前密码相同");
+        return CHAT_ERR;
+    }
+
+    /* 换一把新盐重新哈希：密文与旧会话都不可复用 */
+    util_random_hex(16, salt);
+    if (make_pass_hash(salt, new_pw, hash) != CHAT_OK) {
+        send_error(fd, 500, "服务器内部错误");
+        return CHAT_ERR;
+    }
+    if (db_user_set_password(s.user_id, hash, salt) != CHAT_OK) {
+        send_error(fd, 500, "服务器内部错误");
+        return CHAT_ERR;
+    }
+
+    /* 安全收尾：踢掉其它设备上的登录会话，保留当前这一个 */
+    (void)db_session_delete_others(s.user_id, s.token);
+
+    http_respond_json(fd, 200, "{\"ok\":true}");
     return CHAT_OK;
 }
